@@ -108,7 +108,7 @@
     },
     "vnetAddressSpace": {
       "type": "string",
-      "defaultValue": "10.0.0.0/16",
+      "defaultValue": "10.213.112.0/20",
       "metadata": {
         "description": "Virtual Network Address Prefix (i.e. CIDR)"
       }
@@ -122,7 +122,7 @@
     },
     "subnet1AddressSpace": {
       "type": "string",
-      "defaultValue": "10.0.1.0/24",
+      "defaultValue": "10.213.112.0/22",
       "metadata": {
         "description": "Subnet1 Address Space"
       }
@@ -208,7 +208,7 @@
       "[concat(uniqueString(resourceGroup().id,'13'),parameters('clusterName'),'13')]",
       "[concat(uniqueString(resourceGroup().id,'14'),parameters('clusterName'),'14')]"
     ],
-    "storageAccountCount": "[add(div(add(parameters('edgeCount'),2),20),1)]",
+    "storageAccountCount": "[add(div(add(add(parameters('edgeCount'),parameters('originCount')),parameters('midgresCount')),20),1)]",
     "sshKeyPath": "[concat('/home/',parameters('adminUsername'),'/.ssh/authorized_keys')]",
     "linuxConfiguration_sshPublicKey": {
       "disablePasswordAuthentication": "true",
@@ -327,25 +327,11 @@
               "description": "Allow RTMP access",
               "protocol": "Tcp",
               "sourcePortRange": "*",
-              "destinationPortRange": "*",
+              "destinationPortRange": "1935",
               "sourceAddressPrefix": "*",
               "destinationAddressPrefix": "*",
               "access": "Allow",
               "priority": 101,
-              "direction": "Inbound"
-            }
-          },
-          {
-            "name": "wow_rule",
-            "properties": {
-              "description": "Allow WOW access",
-              "protocol": "Tcp",
-              "sourcePortRange": "*",
-              "destinationPortRange": "*",
-              "sourceAddressPrefix": "*",
-              "destinationAddressPrefix": "*",
-              "access": "Allow",
-              "priority": 102,
               "direction": "Inbound"
             }
           }
@@ -368,25 +354,11 @@
               "description": "Allow RTMP access",
               "protocol": "Tcp",
               "sourcePortRange": "*",
-              "destinationPortRange": "*",
+              "destinationPortRange": "1935",
               "sourceAddressPrefix": "*",
               "destinationAddressPrefix": "*",
               "access": "Allow",
               "priority": 101,
-              "direction": "Inbound"
-            }
-          },
-          {
-            "name": "wow_rule",
-            "properties": {
-              "description": "Allow WOW access",
-              "protocol": "Tcp",
-              "sourcePortRange": "*",
-              "destinationPortRange": "*",
-              "sourceAddressPrefix": "*",
-              "destinationAddressPrefix": "*",
-              "access": "Allow",
-              "priority": 102,
               "direction": "Inbound"
             }
           }
@@ -466,7 +438,7 @@
       ],
       "copy": {
         "name": "originNicsCopy",
-        "count": "[parameters('edgeCount')]"
+        "count": "[parameters('originCount')]"
       },
       "tags": {
         "provider": "[toUpper(parameters('providerTags').provider)]"
@@ -591,7 +563,7 @@
           "osDisk": {
             "name": "osdisk",
             "vhd": {
-              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))],variables('originVmName'),copyIndex(),'-osdisk.vhd')]"
+              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('originVmName'),copyIndex(),'-osdisk.vhd')]"
             },
             "caching": "ReadWrite",
             "createOption": "FromImage"
@@ -657,7 +629,7 @@
           "osDisk": {
             "name": "osdisk",
             "vhd": {
-              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))],variables('midgresVmName'),copyIndex(),'-osdisk.vhd')]"
+              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('midgresVmName'),copyIndex(),'-osdisk.vhd')]"
             },
             "caching": "ReadWrite",
             "createOption": "FromImage"
@@ -723,7 +695,7 @@
           "osDisk": {
             "name": "osdisk",
             "vhd": {
-              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))],variables('edgeVmName'),copyIndex(),'-osdisk.vhd')]"
+              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('edgeVmName'),copyIndex(),'-osdisk.vhd')]"
             },
             "caching": "ReadWrite",
             "createOption": "FromImage"
