@@ -452,6 +452,9 @@
             "name": "ip1",
             "properties": {
               "privateIPAllocationMethod": "Dynamic",
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('originPublicIPName'), copyIndex())]"
+              },
               "subnet": {
                 "id": "[variables('subnet1ID')]"
               }
@@ -513,6 +516,9 @@
             "name": "ip1",
             "properties": {
               "privateIPAllocationMethod": "Dynamic",
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('edgePublicIPName'), copyIndex())]"
+              },
               "subnet": {
                 "id": "[variables('subnet1ID')]"
               }
