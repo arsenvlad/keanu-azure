@@ -1,0 +1,787 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "artifactsBaseUrl": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/arsenvlad/keanu-azure/master/simple-example",
+      "metadata": {
+        "description": "Base URL for artifacts such as nested templates and scripts",
+        "artifactsBaseUrl": ""
+      }
+    },
+    "providerTags": {
+      "type": "object",
+      "defaultValue": {
+        "provider": "75DD2732-52CD-4DDE-9BF6-E2A024921C63"
+      },
+      "metadata": {
+        "description": "Provider tags"
+      }
+    },
+    "location": {
+      "type": "string",
+      "metadata": {
+        "description": "Location for the deployment"
+      }
+    },
+    "clusterName": {
+      "type": "string",
+      "minLength": "3",
+      "maxLength": "10",
+      "metadata": {
+        "description": "Cluster name consisting of 3-10 lowercase letter and numbers"
+      }
+    },
+    "adminUserName": {
+      "type": "string",
+      "defaultValue": "azureuser",
+      "metadata": {
+        "description": "Username for administrator"
+      }
+    },
+    "authenticationType": {
+      "type": "string",
+      "defaultValue": "password",
+      "allowedValues": [
+        "password",
+        "sshPublicKey"
+      ],
+      "metadata": {
+        "description": "Authentication type for the virtual machines"
+      }
+    },
+    "adminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password for administrator"
+      }
+    },
+    "sshPublicKey": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "SSH public key that will be included on all nodes in the cluster. The OpenSSH public key can be generated with tools like ssh-keygen on Linux or OS X."
+      }
+    },
+    "originVmSize": {
+      "type": "string",
+      "defaultValue": "Standard_DS5_v2",
+      "metadata": {
+        "description": "VM size for origin VMs"
+      }
+    },
+    "originCount": {
+      "type": "int",
+      "defaultValue": 1,
+      "metadata": {
+        "description": "The number of virtual machines instances to provision for origin VMs"
+      }
+    },
+    "midgresVmSize": {
+      "type": "string",
+      "defaultValue": "Standard_DS5_v2",
+      "metadata": {
+        "description": "VM size for edge VMs"
+      }
+    },
+    "midgresCount": {
+      "type": "int",
+      "defaultValue": 1,
+      "metadata": {
+        "description": "The number of virtual machines instances to provision for midgres VMs"
+      }
+    },
+    "edgeVmSize": {
+      "type": "string",
+      "defaultValue": "Standard_DS5_v2",
+      "metadata": {
+        "description": "VM size for edge VMs"
+      }
+    },
+    "edgeCount": {
+      "type": "int",
+      "defaultValue": 3,
+      "metadata": {
+        "description": "The number of virtual machines instances to provision for edge VMs"
+      }
+    },
+    "vnetAddressSpace": {
+      "type": "string",
+      "defaultValue": "10.0.0.0/16",
+      "metadata": {
+        "description": "Virtual Network Address Prefix (i.e. CIDR)"
+      }
+    },
+    "subnet1Name": {
+      "type": "string",
+      "defaultValue": "default",
+      "metadata": {
+        "description": "Subnet1 Name"
+      }
+    },
+    "subnet1AddressSpace": {
+      "type": "string",
+      "defaultValue": "10.0.1.0/24",
+      "metadata": {
+        "description": "Subnet1 Address Space"
+      }
+    },
+    "allowedIPAddressPrefix": {
+      "type": "string",
+      "defaultValue": "0.0.0.0/0",
+      "metadata": {
+        "description": "The IP address range (i.e. CIDR) that can be used to access the VMs from the outside of the VNet"
+      }
+    }
+  },
+  "variables": {
+    "apiVersions": {
+      "resources": {
+        "deployments": "2016-09-01"
+      },
+      "storage": {
+        "storageAccounts": "2016-05-01"
+      },
+      "network": {
+        "virtualNetworks": "2016-09-01",
+        "networkInterfaces": "2016-09-01",
+        "loadBalancers": "2016-09-01",
+        "publicIPAddresses": "2016-09-01",
+        "networkSecurityGroups": "2016-09-01"
+      },
+      "compute": {
+        "availabilitySets": "2016-03-30",
+        "virtualMachines": "2016-03-30",
+        "virtualMachineExtensions": "2016-03-30"
+      }
+    },
+    "baseUrl": "[concat(parameters('artifactsBaseUrl'),'/')]",
+    "scriptUrlInit": "[concat(variables('baseUrl'),'init.sh')]",
+    "virtualNetworkName": "[concat(parameters('clusterName'),'-vnet')]",
+    "addressPrefix": "[parameters('vnetAddressSpace')]",
+    "vnetID": "[resourceId('Microsoft.Network/virtualNetworks',variables('virtualNetworkName'))]",
+    "subnet1ID": "[concat(variables('vnetID'),'/subnets/',parameters('subnet1Name'))]",
+    "originVmName": "[concat(parameters('clusterName'),'-o')]",
+    "originNsgName": "[concat(parameters('clusterName'),'-nsg-o')]",
+    "originNicName": "[concat(parameters('clusterName'),'-nic-o')]",
+    "originPublicIPName": "[concat(parameters('clusterName'),'-pip-o')]",
+    "midgresVmName": "[concat(parameters('clusterName'),'-m')]",
+    "midgresNsgName": "[concat(parameters('clusterName'),'nsg-m')]",
+    "midgresNicName": "[concat(parameters('clusterName'),'-nic-m')]",
+    "edgeVmName": "[concat(parameters('clusterName'),'-e')]",
+    "edgePublicIPName": "[concat(parameters('clusterName'),'-pip-e')]",
+    "edgeNicName": "[concat(parameters('clusterName'),'-nic-e')]",
+    "edgeNsgName": "[concat(parameters('clusterName'),'-nsg-e')]",
+    "domainNameLabelPrefix": "[concat(parameters('clusterName'),uniqueString(resourceGroup().id,'d'))]",
+    "diagnosticsStorageAccount": "[concat('d',uniqueString(resourceGroup().id,'d'),parameters('clusterName'))]",
+    "storageAccountType": "Premium_LRS",
+    "originAvailabilitySetSettings": {
+      "name": "[concat(parameters('clusterName'),'-as-o')]",
+      "faultDomainCount": "3",
+      "updateDomainCount": "20"
+    },
+    "midgresAvailabilitySetSettings": {
+      "name": "[concat(parameters('clusterName'),'-as-m')]",
+      "faultDomainCount": "3",
+      "updateDomainCount": "20"
+    },
+    "edgeAvailabilitySetSettings": {
+      "name": "[concat(parameters('clusterName'),'-as-e')]",
+      "faultDomainCount": "3",
+      "updateDomainCount": "20"
+    },
+    "storageAccountArray": [
+      "[concat(uniqueString(resourceGroup().id,'00'),parameters('clusterName'),'00')]",
+      "[concat(uniqueString(resourceGroup().id,'01'),parameters('clusterName'),'01')]",
+      "[concat(uniqueString(resourceGroup().id,'02'),parameters('clusterName'),'02')]",
+      "[concat(uniqueString(resourceGroup().id,'03'),parameters('clusterName'),'03')]",
+      "[concat(uniqueString(resourceGroup().id,'04'),parameters('clusterName'),'04')]",
+      "[concat(uniqueString(resourceGroup().id,'05'),parameters('clusterName'),'05')]",
+      "[concat(uniqueString(resourceGroup().id,'06'),parameters('clusterName'),'06')]",
+      "[concat(uniqueString(resourceGroup().id,'07'),parameters('clusterName'),'07')]",
+      "[concat(uniqueString(resourceGroup().id,'08'),parameters('clusterName'),'08')]",
+      "[concat(uniqueString(resourceGroup().id,'09'),parameters('clusterName'),'09')]",
+      "[concat(uniqueString(resourceGroup().id,'10'),parameters('clusterName'),'10')]",
+      "[concat(uniqueString(resourceGroup().id,'11'),parameters('clusterName'),'11')]",
+      "[concat(uniqueString(resourceGroup().id,'12'),parameters('clusterName'),'12')]",
+      "[concat(uniqueString(resourceGroup().id,'13'),parameters('clusterName'),'13')]",
+      "[concat(uniqueString(resourceGroup().id,'14'),parameters('clusterName'),'14')]"
+    ],
+    "storageAccountCount": "[add(div(add(parameters('edgeCount'),2),20),1)]",
+    "sshKeyPath": "[concat('/home/',parameters('adminUsername'),'/.ssh/authorized_keys')]",
+    "linuxConfiguration_sshPublicKey": {
+      "disablePasswordAuthentication": "true",
+      "ssh": {
+        "publicKeys": [
+          {
+            "path": "[variables('sshKeyPath')]",
+            "keyData": "[parameters('sshPublicKey')]"
+          }
+        ]
+      }
+    },
+    "linuxConfiguration_password": { },
+    "linuxConfiguration": "[variables(concat('linuxConfiguration_',parameters('authenticationType')))]"
+  },
+  "resources": [
+    {
+      "apiVersion": "[variables('apiVersions').storage.storageAccounts]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[variables('storageAccountArray')[copyIndex()]]",
+      "location": "[parameters('location')]",
+      "copy": {
+        "name": "storageAccountsCopy",
+        "count": "[variables('storageAccountCount')]"
+      },
+      "kind": "Storage",
+      "sku": {
+        "name": "[variables('storageAccountType')]"
+      },
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').network.publicIPAddresses]",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[concat(variables('originPublicIPName'),copyIndex())]",
+      "location": "[parameters('location')]",
+      "copy": {
+        "name": "originPublicIPsCopy",
+        "count": "[parameters('originCount')]"
+      },
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic",
+        "dnsSettings": {
+          "domainNameLabel": "[concat(variables('domainNameLabelPrefix'),'-o',copyIndex())]"
+        }
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').network.publicIPAddresses]",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[concat(variables('edgePublicIPName'),copyIndex())]",
+      "location": "[parameters('location')]",
+      "copy": {
+        "name": "edgePublicIPsCopy",
+        "count": "[parameters('edgeCount')]"
+      },
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic",
+        "dnsSettings": {
+          "domainNameLabel": "[concat(variables('domainNameLabelPrefix'),'-e',copyIndex())]"
+        }
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').storage.storageAccounts]",
+      "type": "Microsoft.Storage/storageAccounts",
+      "name": "[variables('diagnosticsStorageAccount')]",
+      "location": "[parameters('location')]",
+      "kind": "Storage",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').network.networkSecurityGroups]",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[variables('originNsgName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "securityRules": [
+          {
+            "name": "ssh_rule",
+            "properties": {
+              "description": "Allow SSH access",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "22",
+              "sourceAddressPrefix": "[parameters('allowedIPAddressPrefix')]",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 100,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "rtmp_rule",
+            "properties": {
+              "description": "Allow RTMP access",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 101,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "wow_rule",
+            "properties": {
+              "description": "Allow WOW access",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 102,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').network.networkSecurityGroups]",
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[variables('edgeNsgName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "securityRules": [
+          {
+            "name": "rtmp_rule",
+            "properties": {
+              "description": "Allow RTMP access",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 101,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "wow_rule",
+            "properties": {
+              "description": "Allow WOW access",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 102,
+              "direction": "Inbound"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').network.virtualNetworks]",
+      "type": "Microsoft.Network/virtualNetworks",
+      "name": "[variables('virtualNetworkName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('addressPrefix')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[parameters('subnet1Name')]",
+            "properties": {
+              "addressPrefix": "[parameters('subnet1AddressSpace')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "[variables('apiversions').compute.availabilitySets]",
+      "type": "Microsoft.Compute/availabilitySets",
+      "name": "[variables('originAvailabilitySetSettings').name]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "platformFaultDomainCount": "[variables('originAvailabilitySetSettings').faultDomainCount]",
+        "platformUpdateDomainCount": "[variables('originAvailabilitySetSettings').updateDomainCount]"
+      }
+    },
+    {
+      "apiVersion": "[variables('apiversions').compute.availabilitySets]",
+      "type": "Microsoft.Compute/availabilitySets",
+      "name": "[variables('midgresAvailabilitySetSettings').name]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "platformFaultDomainCount": "[variables('midgresAvailabilitySetSettings').faultDomainCount]",
+        "platformUpdateDomainCount": "[variables('midgresAvailabilitySetSettings').updateDomainCount]"
+      }
+    },
+    {
+      "apiVersion": "[variables('apiversions').compute.availabilitySets]",
+      "type": "Microsoft.Compute/availabilitySets",
+      "name": "[variables('edgeAvailabilitySetSettings').name]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "platformFaultDomainCount": "[variables('edgeAvailabilitySetSettings').faultDomainCount]",
+        "platformUpdateDomainCount": "[variables('edgeAvailabilitySetSettings').updateDomainCount]"
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').network.networkInterfaces]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[concat(variables('originNicName'),copyIndex())]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
+      ],
+      "copy": {
+        "name": "originNicsCopy",
+        "count": "[parameters('edgeCount')]"
+      },
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "networkSecurityGroup": {
+          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('originNsgName'))]"
+        },
+        "ipConfigurations": [
+          {
+            "name": "ip1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('subnet1ID')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').network.networkInterfaces]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[concat(variables('midgresNicName'),copyIndex())]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
+      ],
+      "copy": {
+        "name": "midgresNicsCopy",
+        "count": "[parameters('midgresCount')]"
+      },
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ip1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('subnet1ID')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').network.networkInterfaces]",
+      "type": "Microsoft.Network/networkInterfaces",
+      "name": "[concat(variables('edgeNicName'),copyIndex())]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName'))]"
+      ],
+      "copy": {
+        "name": "edgeNicsCopy",
+        "count": "[parameters('edgeCount')]"
+      },
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "networkSecurityGroup": {
+          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('edgeNsgName'))]"
+        },
+        "ipConfigurations": [
+          {
+            "name": "ip1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('subnet1ID')]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').compute.virtualMachines]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "name": "[concat(variables('originVmName'),copyIndex())]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Compute/availabilitySets/', variables('originAvailabilitySetSettings').name)]",
+        "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))])]",
+        "[concat('Microsoft.Network/networkInterfaces/', concat(variables('originNicName'),copyIndex()))]",
+        "[concat('Microsoft.Storage/storageAccounts/', variables('diagnosticsStorageAccount'))]"
+      ],
+      "copy": {
+        "name": "originVmsCopy",
+        "count": "[parameters('originCount')]"
+      },
+      "tags": {
+        "Name": "[concat(variables('originVmName'),copyIndex())]",
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "availabilitySet": {
+          "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('originAvailabilitySetSettings').name)]"
+        },
+        "hardwareProfile": {
+          "vmSize": "[parameters('originVmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[concat(variables('originVmName'),copyIndex())]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "linuxConfiguration": "[variables('linuxConfiguration')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04-LTS",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "osdisk",
+            "vhd": {
+              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))],variables('originVmName'),copyIndex(),'-osdisk.vhd')]"
+            },
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": "true",
+            "storageUri": "[concat('http://', variables('diagnosticsStorageAccount'), '.blob.core.windows.net')]"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(variables('originNicName'),copyIndex()))]",
+              "properties": {
+                "primary": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').compute.virtualMachines]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "name": "[concat(variables('midgresVmName'),copyIndex())]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Compute/availabilitySets/', variables('midgresAvailabilitySetSettings').name)]",
+        "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))])]",
+        "[concat('Microsoft.Network/networkInterfaces/', concat(variables('midgresNicName'),copyIndex()))]",
+        "[concat('Microsoft.Storage/storageAccounts/', variables('diagnosticsStorageAccount'))]"
+      ],
+      "copy": {
+        "name": "midgresVmsCopy",
+        "count": "[parameters('midgresCount')]"
+      },
+      "tags": {
+        "Name": "[concat(variables('midgresVmName'),copyIndex())]",
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "availabilitySet": {
+          "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('midgresAvailabilitySetSettings').name)]"
+        },
+        "hardwareProfile": {
+          "vmSize": "[parameters('originVmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[concat(variables('midgresVmName'),copyIndex())]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "linuxConfiguration": "[variables('linuxConfiguration')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04-LTS",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "osdisk",
+            "vhd": {
+              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))],variables('midgresVmName'),copyIndex(),'-osdisk.vhd')]"
+            },
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": "true",
+            "storageUri": "[concat('http://', variables('diagnosticsStorageAccount'), '.blob.core.windows.net')]"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(variables('midgresNicName'),copyIndex()))]",
+              "properties": {
+                "primary": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').compute.virtualMachines]",
+      "type": "Microsoft.Compute/virtualMachines",
+      "name": "[concat(variables('edgeVmName'),copyIndex())]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Compute/availabilitySets/', variables('edgeAvailabilitySetSettings').name)]",
+        "[concat('Microsoft.Storage/storageAccounts/', variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))])]",
+        "[concat('Microsoft.Network/networkInterfaces/', concat(variables('edgeNicName'),copyIndex()))]",
+        "[concat('Microsoft.Storage/storageAccounts/', variables('diagnosticsStorageAccount'))]"
+      ],
+      "copy": {
+        "name": "edgeVmsCopy",
+        "count": "[parameters('edgeCount')]"
+      },
+      "tags": {
+        "Name": "[concat(variables('edgeVmName'),copyIndex())]",
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "availabilitySet": {
+          "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('edgeAvailabilitySetSettings').name)]"
+        },
+        "hardwareProfile": {
+          "vmSize": "[parameters('edgeVmSize')]"
+        },
+        "osProfile": {
+          "computerName": "[concat(variables('edgeVmName'),copyIndex())]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "linuxConfiguration": "[variables('linuxConfiguration')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "UbuntuServer",
+            "sku": "16.04-LTS",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "osdisk",
+            "vhd": {
+              "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))]),'2016-05-01').primaryEndpoints.blob,'vhds/',variables('storageAccountArray')[mod(copyIndex(),variables('storageAccountCount'))],variables('edgeVmName'),copyIndex(),'-osdisk.vhd')]"
+            },
+            "caching": "ReadWrite",
+            "createOption": "FromImage"
+          }
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": "true",
+            "storageUri": "[concat('http://', variables('diagnosticsStorageAccount'), '.blob.core.windows.net')]"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(variables('edgeNicName'),copyIndex()))]",
+              "properties": {
+                "primary": true
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "apiVersion": "[variables('apiVersions').compute.virtualMachineExtensions]",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "name": "[concat(concat(variables('edgeVmName'),copyIndex()), '/init')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "edgeVmsCopy"
+      ],
+      "copy": {
+        "name": "edgeExtensionsCopy",
+        "count": "[parameters('edgeCount')]"
+      },
+      "tags": {
+        "provider": "[toUpper(parameters('providerTags').provider)]"
+      },
+      "properties": {
+        "publisher": "Microsoft.Azure.Extensions",
+        "type": "CustomScript",
+        "typeHandlerVersion": "2.0",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "fileUris": [
+            "[variables('scriptUrlInit')]"
+          ]
+        },
+        "protectedSettings": {
+          "commandToExecute": "[concat('sh init.sh')]"
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "originDomainName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses',concat(variables('originPublicIPName'),'0'))).dnsSettings.fqdn]"
+    }
+  }
+}
